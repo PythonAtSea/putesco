@@ -1,7 +1,15 @@
 "use client";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { useMemo, useState } from "react";
+import {
+  Check,
+  CircleAlert,
+  CircleQuestionMark,
+  TriangleAlert,
+} from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 type PackageInfo = {
   id: string;
@@ -20,6 +28,11 @@ type PackageInfo = {
   bundledDependencies?: string[];
   sources: string[];
   raw?: Record<string, unknown>;
+  gitUrl?: string;
+  loading: boolean;
+  npmUrl?: string;
+  localOnly?: boolean;
+  lastCommitDate?: string;
 };
 
 function extractPackages(lockFile: unknown): PackageInfo[] {
@@ -236,6 +249,7 @@ function extractPackages(lockFile: unknown): PackageInfo[] {
       bundledDependencies,
       sources: [source],
       raw: infoRecord,
+      loading: true,
     };
 
     return candidate;
@@ -345,23 +359,294 @@ function extractPackages(lockFile: unknown): PackageInfo[] {
   });
 }
 
+function getMonthsAgo(dateString: string): number {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  return diffMs / (1000 * 60 * 60 * 24 * 30.44);
+}
+
+function formatTimeSince(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffWeeks = Math.floor(diffDays / 7);
+  const diffMonths = Math.floor(diffDays / 30.44);
+  const diffYears = Math.floor(diffDays / 365.25);
+
+  if (diffYears > 0) {
+    return diffYears === 1 ? "1 year" : `${diffYears} years`;
+  } else if (diffMonths > 0) {
+    return diffMonths === 1 ? "1 month" : `${diffMonths} months`;
+  } else if (diffWeeks > 0) {
+    return diffWeeks === 1 ? "1 week" : `${diffWeeks} weeks`;
+  } else {
+    if (diffDays === 0) {
+      return "today";
+    }
+    return diffDays === 1 ? "1 day" : `${diffDays} days`;
+  }
+}
+
 export default function Home() {
   const [packageString, setPackageString] = useState("");
-  const { packages, error } = useMemo(() => {
-    if (!packageString.trim()) {
-      return { packages: [] as PackageInfo[], error: "" };
-    }
+  const [packages, setPackages] = useState<PackageInfo[]>([]);
+  const [error, setError] = useState("");
 
-    try {
-      const parsed = JSON.parse(packageString);
-      const extracted = extractPackages(parsed);
-      if (extracted.length === 0) {
-        return { packages: [], error: "no packages found" };
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const processInput = async () => {
+      const trimmed = packageString.trim();
+      if (!trimmed) {
+        setPackages([]);
+        setError("");
+        return;
       }
-      return { packages: extracted, error: "" };
-    } catch {
-      return { packages: [] as PackageInfo[], error: "not valid json" };
-    }
+
+      try {
+        const parsed = JSON.parse(packageString);
+        const extracted = extractPackages(parsed);
+        if (extracted.length === 0) {
+          setPackages([]);
+          setError("no packages found");
+          return;
+        }
+
+        const initialPackages = extracted.map((pkg) => ({
+          ...pkg,
+          loading: true,
+          localOnly: !pkg.resolved,
+        }));
+
+        setPackages(initialPackages);
+        setError("");
+
+        for (let index = 0; index < initialPackages.length; index += 1) {
+          if (cancelled) {
+            break;
+          }
+
+          if (!initialPackages[index].resolved) {
+            setPackages((prev) => {
+              if (cancelled || index >= prev.length) {
+                return prev;
+              }
+
+              const current = prev[index];
+              if (!current.loading) {
+                return prev;
+              }
+
+              const next = [...prev];
+              next[index] = {
+                ...current,
+                loading: false,
+                localOnly: true,
+              };
+              return next;
+            });
+            continue;
+          }
+
+          const npmUrl = `https://registry.npmjs.org/${
+            initialPackages[index].name
+          }/${initialPackages[index].version ?? "latest"}`;
+
+          try {
+            const response = await fetch(npmUrl, { signal: controller.signal });
+
+            if (!response.ok) {
+              throw new Error(`Request failed with status ${response.status}`);
+            }
+
+            const payload = await response.json();
+
+            if (cancelled) {
+              break;
+            }
+
+            const gitUrl =
+              payload.repository?.type === "git"
+                ? (payload.repository?.url as string | undefined)
+                : undefined;
+
+            let lastCommitDate: string | undefined;
+            if (gitUrl && !cancelled) {
+              try {
+                let normalizedUrl = gitUrl;
+                if (gitUrl.startsWith("git+")) {
+                  normalizedUrl = gitUrl.substring(4);
+                }
+                if (gitUrl.startsWith("git@")) {
+                  const sshMatch = gitUrl.match(/^git@([^:]+):(.+)\.git$/);
+                  if (sshMatch) {
+                    const [, host, path] = sshMatch;
+                    normalizedUrl = `https://${host}/${path}`;
+                  } else {
+                    throw new Error("Unsupported SSH git URL format");
+                  }
+                }
+
+                const url = new URL(normalizedUrl);
+                const hostname = url.hostname;
+                let apiBase: string | undefined;
+                let isGitHub = false;
+                let isGitLab = false;
+                let isBitbucket = false;
+                if (hostname === "github.com") {
+                  apiBase = "https://api.github.com";
+                  isGitHub = true;
+                } else if (hostname === "gitlab.com") {
+                  apiBase = "https://gitlab.com/api/v4";
+                  isGitLab = true;
+                } else if (hostname === "bitbucket.org") {
+                  apiBase = "https://api.bitbucket.org/2.0";
+                  isBitbucket = true;
+                }
+                if (apiBase) {
+                  const pathParts = url.pathname.split("/").filter(Boolean);
+                  if (pathParts.length >= 2) {
+                    const owner = pathParts[0];
+                    const repo = pathParts[1].replace(/\.git$/, "");
+                    let repoUrl: string;
+                    let commitsUrlTemplate: string;
+                    if (isGitHub) {
+                      repoUrl = `${apiBase}/repos/${owner}/${repo}`;
+                      commitsUrlTemplate = `${repoUrl}/commits/{branch}`;
+                    } else if (isGitLab) {
+                      repoUrl = `${apiBase}/projects/${encodeURIComponent(
+                        `${owner}/${repo}`
+                      )}`;
+                      commitsUrlTemplate = `${repoUrl}/repository/commits?ref_name={branch}`;
+                    } else if (isBitbucket) {
+                      repoUrl = `${apiBase}/repositories/${owner}/${repo}`;
+                      commitsUrlTemplate = `${repoUrl}/commits/{branch}`;
+                    } else {
+                      return;
+                    }
+                    const repoResponse = await fetch(repoUrl, {
+                      signal: controller.signal,
+                    });
+                    if (repoResponse.ok) {
+                      const repoData = await repoResponse.json();
+                      let defaultBranch: string;
+                      if (isGitHub || isGitLab) {
+                        defaultBranch = repoData.default_branch || "main";
+                      } else if (isBitbucket) {
+                        defaultBranch = repoData.mainbranch || "main";
+                      } else {
+                        defaultBranch = "main";
+                      }
+                      const commitsUrl = commitsUrlTemplate.replace(
+                        "{branch}",
+                        defaultBranch
+                      );
+                      const commitResponse = await fetch(commitsUrl, {
+                        signal: controller.signal,
+                      });
+                      if (commitResponse.ok) {
+                        const commitData = await commitResponse.json();
+                        let latestCommit;
+                        if (isGitHub) {
+                          latestCommit = Array.isArray(commitData)
+                            ? commitData[0]
+                            : commitData;
+                        } else if (isGitLab) {
+                          latestCommit = Array.isArray(commitData)
+                            ? commitData[0]
+                            : commitData;
+                        } else if (isBitbucket) {
+                          latestCommit = commitData.values
+                            ? commitData.values[0]
+                            : null;
+                        }
+                        if (latestCommit) {
+                          if (isGitHub) {
+                            lastCommitDate =
+                              latestCommit.commit?.committer?.date;
+                          } else if (isGitLab) {
+                            lastCommitDate = latestCommit.committed_date;
+                          } else if (isBitbucket) {
+                            lastCommitDate = latestCommit.date;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error("Failed to fetch commit date", e);
+              }
+            }
+
+            setPackages((prev) => {
+              if (cancelled || index >= prev.length) {
+                return prev;
+              }
+
+              const current = prev[index];
+              if (!current.loading) {
+                return prev;
+              }
+
+              const next = [...prev];
+              next[index] = {
+                ...current,
+                loading: false,
+                raw: {
+                  ...(current.raw ?? {}),
+                  dummyResponse: payload,
+                },
+                npmUrl: npmUrl,
+                gitUrl: gitUrl,
+                lastCommitDate: lastCommitDate,
+              };
+              return next;
+            });
+          } catch (fetchError) {
+            if (cancelled || controller.signal.aborted) {
+              break;
+            }
+
+            console.error(fetchError);
+            console.log(
+              `Failed to fetch data for ${initialPackages[index].name}, url: ${npmUrl}`
+            );
+
+            setPackages((prev) => {
+              if (cancelled || index >= prev.length) {
+                return prev;
+              }
+
+              const current = prev[index];
+              if (!current.loading) {
+                return prev;
+              }
+
+              const next = [...prev];
+              next[index] = {
+                ...current,
+                loading: false,
+              };
+              return next;
+            });
+          }
+        }
+      } catch {
+        setPackages([]);
+        setError("not valid json");
+      }
+    };
+
+    processInput();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [packageString]);
 
   return (
@@ -387,82 +672,106 @@ export default function Home() {
               No packages to display yet.
             </div>
           ) : (
-            packages.map((pkg) => {
-              const flagParts: string[] = [];
-              if (pkg.dev !== undefined) {
-                flagParts.push(`dev: ${pkg.dev ? "true" : "false"}`);
-              }
-              if (pkg.optional !== undefined) {
-                flagParts.push(`optional: ${pkg.optional ? "true" : "false"}`);
-              }
-              if (pkg.peer !== undefined) {
-                flagParts.push(`peer: ${pkg.peer ? "true" : "false"}`);
-              }
+            [...packages]
+              .sort((a, b) => {
+                const dateA = a.lastCommitDate
+                  ? new Date(a.lastCommitDate).getTime()
+                  : Infinity;
+                const dateB = b.lastCommitDate
+                  ? new Date(b.lastCommitDate).getTime()
+                  : Infinity;
+                return dateA - dateB;
+              })
+              .map((pkg) => {
+                const flagParts: string[] = [];
+                if (pkg.dev !== undefined) {
+                  flagParts.push(`dev: ${pkg.dev ? "true" : "false"}`);
+                }
+                if (pkg.optional !== undefined) {
+                  flagParts.push(
+                    `optional: ${pkg.optional ? "true" : "false"}`
+                  );
+                }
+                if (pkg.peer !== undefined) {
+                  flagParts.push(`peer: ${pkg.peer ? "true" : "false"}`);
+                }
 
-              return (
-                <div
-                  key={pkg.id}
-                  className="p-2 border border-border space-y-1"
-                >
-                  <div className="font-medium">{pkg.name}</div>
-                  {pkg.version && (
-                    <div className="text-sm text-muted-foreground">
-                      Version: {pkg.version}
+                const monthsAgo = pkg.lastCommitDate
+                  ? getMonthsAgo(pkg.lastCommitDate)
+                  : null;
+
+                return (
+                  <div
+                    key={pkg.id}
+                    className="p-2 border border-border flex items-start gap-2"
+                  >
+                    <div className="font-medium flex-1">
+                      {pkg.name}
+                      {pkg.version && (
+                        <span className="text-sm text-muted-foreground">
+                          {" v" + pkg.version}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  {pkg.path && (
-                    <div className="text-xs text-muted-foreground break-all">
-                      Path: {pkg.path}
-                    </div>
-                  )}
-                  {pkg.resolved && (
-                    <div className="text-xs text-muted-foreground break-all">
-                      Resolved: {pkg.resolved}
-                    </div>
-                  )}
-                  {pkg.integrity && (
-                    <div className="text-xs text-muted-foreground break-all">
-                      Integrity: {pkg.integrity}
-                    </div>
-                  )}
-                  {flagParts.length > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      {flagParts.join(" · ")}
-                    </div>
-                  )}
-                  {pkg.dependencies && (
-                    <div className="text-xs text-muted-foreground">
-                      Dependencies: {pkg.dependencies.join(", ")}
-                    </div>
-                  )}
-                  {pkg.requires && (
-                    <div className="text-xs text-muted-foreground">
-                      Requires: {pkg.requires.join(", ")}
-                    </div>
-                  )}
-                  {pkg.peerDependencies && (
-                    <div className="text-xs text-muted-foreground">
-                      Peer deps: {pkg.peerDependencies.join(", ")}
-                    </div>
-                  )}
-                  {pkg.bundledDependencies && (
-                    <div className="text-xs text-muted-foreground">
-                      Bundled deps: {pkg.bundledDependencies.join(", ")}
-                    </div>
-                  )}
-                  {pkg.sources.length > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Sources: {pkg.sources.join(", ")}
-                    </div>
-                  )}
-                  {pkg.raw && (
-                    <pre className="mt-2 max-h-40 overflow-auto bg-muted p-2 text-xs">
-                      {JSON.stringify(pkg.raw, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              );
-            })
+
+                    {pkg.loading && (
+                      <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap shrink-0 h-full flex items-center border border-border">
+                        Loading
+                        <Spinner className="inline-block ml-1" />
+                      </span>
+                    )}
+                    {pkg.gitUrl && monthsAgo !== null && (
+                      <>
+                        {monthsAgo > 18 && (
+                          <Link
+                            href={pkg.gitUrl}
+                            className="text-sm bg-red-200 text-red-800 px-2 py-1 shrink-0 border border-red-800"
+                          >
+                            {formatTimeSince(pkg.lastCommitDate!)}
+                            <TriangleAlert className="inline-block ml-1 size-4" />
+                          </Link>
+                        )}
+                        {monthsAgo > 6 && monthsAgo <= 18 && (
+                          <Link
+                            href={pkg.gitUrl}
+                            className="text-sm bg-yellow-200 text-yellow-800 px-2 py-1 shrink-0 border border-yellow-800"
+                          >
+                            {formatTimeSince(pkg.lastCommitDate!)}
+                            <CircleAlert className="inline-block ml-1 size-4" />
+                          </Link>
+                        )}
+                        {monthsAgo <= 6 && (
+                          <Link
+                            href={pkg.gitUrl}
+                            className="text-sm bg-green-200 text-green-800 px-2 py-1 shrink-0 border border-green-800"
+                          >
+                            {formatTimeSince(pkg.lastCommitDate!)}
+                            <Check className="inline-block ml-1 size-4" />
+                          </Link>
+                        )}
+                      </>
+                    )}
+                    {monthsAgo === null &&
+                      pkg.gitUrl &&
+                      !pkg.loading &&
+                      !pkg.localOnly && (
+                        <Link
+                          href={pkg.gitUrl}
+                          className="text-sm text-secondary-foreground bg-secondary px-2 py-1 shrink-0 border border-border"
+                        >
+                          Unknown
+                          <CircleQuestionMark className="inline-block ml-1 size-4" />
+                        </Link>
+                      )}
+                    {!pkg.loading && pkg.localOnly && (
+                      <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 shrink-0 border border-border">
+                        Local only
+                        <CircleQuestionMark className="inline-block ml-1 size-4" />
+                      </span>
+                    )}
+                  </div>
+                );
+              })
           )}
         </div>
       </div>
