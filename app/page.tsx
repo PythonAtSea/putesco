@@ -492,86 +492,81 @@ export default function Home() {
 
                 const url = new URL(normalizedUrl);
                 const hostname = url.hostname;
-                let apiBase: string | undefined;
-                let isGitHub = false;
-                let isGitLab = false;
-                let isBitbucket = false;
-                if (hostname === "github.com") {
-                  apiBase = "https://api.github.com";
-                  isGitHub = true;
-                } else if (hostname === "gitlab.com") {
-                  apiBase = "https://gitlab.com/api/v4";
-                  isGitLab = true;
-                } else if (hostname === "bitbucket.org") {
-                  apiBase = "https://api.bitbucket.org/2.0";
-                  isBitbucket = true;
-                }
-                if (apiBase) {
-                  const pathParts = url.pathname.split("/").filter(Boolean);
-                  if (pathParts.length >= 2) {
-                    const owner = pathParts[0];
-                    const repo = pathParts[1].replace(/\.git$/, "");
-                    let repoUrl: string;
-                    let commitsUrlTemplate: string;
-                    if (isGitHub) {
-                      repoUrl = `${apiBase}/repos/${owner}/${repo}`;
-                      commitsUrlTemplate = `${repoUrl}/commits/{branch}`;
-                    } else if (isGitLab) {
-                      repoUrl = `${apiBase}/projects/${encodeURIComponent(
-                        `${owner}/${repo}`
-                      )}`;
-                      commitsUrlTemplate = `${repoUrl}/repository/commits?ref_name={branch}`;
-                    } else if (isBitbucket) {
-                      repoUrl = `${apiBase}/repositories/${owner}/${repo}`;
-                      commitsUrlTemplate = `${repoUrl}/commits/{branch}`;
-                    } else {
-                      return;
+                const pathParts = url.pathname.split("/").filter(Boolean);
+
+                if (pathParts.length >= 2) {
+                  const owner = pathParts[0];
+                  const repo = pathParts[1].replace(/\.git$/, "");
+
+                  if (hostname === "github.com") {
+                    const apiResponse = await fetch("/api/github-commit", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({ owner, repo }),
+                      signal: controller.signal,
+                    });
+
+                    if (apiResponse.ok) {
+                      const apiData = await apiResponse.json();
+                      lastCommitDate = apiData.lastCommitDate;
                     }
+                  } else if (hostname === "gitlab.com") {
+                    const apiBase = "https://gitlab.com/api/v4";
+                    const repoUrl = `${apiBase}/projects/${encodeURIComponent(
+                      `${owner}/${repo}`
+                    )}`;
+
                     const repoResponse = await fetch(repoUrl, {
                       signal: controller.signal,
                     });
+
                     if (repoResponse.ok) {
                       const repoData = await repoResponse.json();
-                      let defaultBranch: string;
-                      if (isGitHub || isGitLab) {
-                        defaultBranch = repoData.default_branch || "main";
-                      } else if (isBitbucket) {
-                        defaultBranch = repoData.mainbranch || "main";
-                      } else {
-                        defaultBranch = "main";
-                      }
-                      const commitsUrl = commitsUrlTemplate.replace(
-                        "{branch}",
-                        defaultBranch
-                      );
+                      const defaultBranch = repoData.default_branch || "main";
+                      const commitsUrl = `${repoUrl}/repository/commits?ref_name=${defaultBranch}`;
+
                       const commitResponse = await fetch(commitsUrl, {
                         signal: controller.signal,
                       });
+
                       if (commitResponse.ok) {
                         const commitData = await commitResponse.json();
-                        let latestCommit;
-                        if (isGitHub) {
-                          latestCommit = Array.isArray(commitData)
-                            ? commitData[0]
-                            : commitData;
-                        } else if (isGitLab) {
-                          latestCommit = Array.isArray(commitData)
-                            ? commitData[0]
-                            : commitData;
-                        } else if (isBitbucket) {
-                          latestCommit = commitData.values
-                            ? commitData.values[0]
-                            : null;
-                        }
+                        const latestCommit = Array.isArray(commitData)
+                          ? commitData[0]
+                          : commitData;
+
                         if (latestCommit) {
-                          if (isGitHub) {
-                            lastCommitDate =
-                              latestCommit.commit?.committer?.date;
-                          } else if (isGitLab) {
-                            lastCommitDate = latestCommit.committed_date;
-                          } else if (isBitbucket) {
-                            lastCommitDate = latestCommit.date;
-                          }
+                          lastCommitDate = latestCommit.committed_date;
+                        }
+                      }
+                    }
+                  } else if (hostname === "bitbucket.org") {
+                    const apiBase = "https://api.bitbucket.org/2.0";
+                    const repoUrl = `${apiBase}/repositories/${owner}/${repo}`;
+
+                    const repoResponse = await fetch(repoUrl, {
+                      signal: controller.signal,
+                    });
+
+                    if (repoResponse.ok) {
+                      const repoData = await repoResponse.json();
+                      const defaultBranch = repoData.mainbranch || "main";
+                      const commitsUrl = `${repoUrl}/commits/${defaultBranch}`;
+
+                      const commitResponse = await fetch(commitsUrl, {
+                        signal: controller.signal,
+                      });
+
+                      if (commitResponse.ok) {
+                        const commitData = await commitResponse.json();
+                        const latestCommit = commitData.values
+                          ? commitData.values[0]
+                          : null;
+
+                        if (latestCommit) {
+                          lastCommitDate = latestCommit.date;
                         }
                       }
                     }
