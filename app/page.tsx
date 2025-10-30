@@ -424,12 +424,12 @@ export default function Home() {
         setPackages(initialPackages);
         setError("");
 
-        for (let index = 0; index < initialPackages.length; index += 1) {
+        const fetchPackageData = async (pkg: PackageInfo, index: number) => {
           if (cancelled) {
-            break;
+            return;
           }
 
-          if (!initialPackages[index].resolved) {
+          if (!pkg.resolved) {
             setPackages((prev) => {
               if (cancelled || index >= prev.length) {
                 return prev;
@@ -448,12 +448,12 @@ export default function Home() {
               };
               return next;
             });
-            continue;
+            return;
           }
 
-          const npmUrl = `https://registry.npmjs.org/${
-            initialPackages[index].name
-          }/${initialPackages[index].version ?? "latest"}`;
+          const npmUrl = `https://registry.npmjs.org/${pkg.name}/${
+            pkg.version ?? "latest"
+          }`;
 
           try {
             const response = await fetch(npmUrl, { signal: controller.signal });
@@ -465,7 +465,7 @@ export default function Home() {
             const payload = await response.json();
 
             if (cancelled) {
-              break;
+              return;
             }
 
             const gitUrl =
@@ -498,79 +498,84 @@ export default function Home() {
                   const owner = pathParts[0];
                   const repo = pathParts[1].replace(/\.git$/, "");
 
-                  if (hostname === "github.com") {
-                    const apiResponse = await fetch("/api/github-commit", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({ owner, repo }),
-                      signal: controller.signal,
-                    });
-
-                    if (apiResponse.ok) {
-                      const apiData = await apiResponse.json();
-                      lastCommitDate = apiData.lastCommitDate;
-                    }
-                  } else if (hostname === "gitlab.com") {
-                    const apiBase = "https://gitlab.com/api/v4";
-                    const repoUrl = `${apiBase}/projects/${encodeURIComponent(
-                      `${owner}/${repo}`
-                    )}`;
-
-                    const repoResponse = await fetch(repoUrl, {
-                      signal: controller.signal,
-                    });
-
-                    if (repoResponse.ok) {
-                      const repoData = await repoResponse.json();
-                      const defaultBranch = repoData.default_branch || "main";
-                      const commitsUrl = `${repoUrl}/repository/commits?ref_name=${defaultBranch}`;
-
-                      const commitResponse = await fetch(commitsUrl, {
+                  const commitDatePromise = (async () => {
+                    if (hostname === "github.com") {
+                      const apiResponse = await fetch("/api/github-commit", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ owner, repo }),
                         signal: controller.signal,
                       });
 
-                      if (commitResponse.ok) {
-                        const commitData = await commitResponse.json();
-                        const latestCommit = Array.isArray(commitData)
-                          ? commitData[0]
-                          : commitData;
-
-                        if (latestCommit) {
-                          lastCommitDate = latestCommit.committed_date;
-                        }
+                      if (apiResponse.ok) {
+                        const apiData = await apiResponse.json();
+                        return apiData.lastCommitDate;
                       }
-                    }
-                  } else if (hostname === "bitbucket.org") {
-                    const apiBase = "https://api.bitbucket.org/2.0";
-                    const repoUrl = `${apiBase}/repositories/${owner}/${repo}`;
+                    } else if (hostname === "gitlab.com") {
+                      const apiBase = "https://gitlab.com/api/v4";
+                      const repoUrl = `${apiBase}/projects/${encodeURIComponent(
+                        `${owner}/${repo}`
+                      )}`;
 
-                    const repoResponse = await fetch(repoUrl, {
-                      signal: controller.signal,
-                    });
-
-                    if (repoResponse.ok) {
-                      const repoData = await repoResponse.json();
-                      const defaultBranch = repoData.mainbranch || "main";
-                      const commitsUrl = `${repoUrl}/commits/${defaultBranch}`;
-
-                      const commitResponse = await fetch(commitsUrl, {
+                      const repoResponse = await fetch(repoUrl, {
                         signal: controller.signal,
                       });
 
-                      if (commitResponse.ok) {
-                        const commitData = await commitResponse.json();
-                        const latestCommit = commitData.values
-                          ? commitData.values[0]
-                          : null;
+                      if (repoResponse.ok) {
+                        const repoData = await repoResponse.json();
+                        const defaultBranch = repoData.default_branch || "main";
+                        const commitsUrl = `${repoUrl}/repository/commits?ref_name=${defaultBranch}`;
 
-                        if (latestCommit) {
-                          lastCommitDate = latestCommit.date;
+                        const commitResponse = await fetch(commitsUrl, {
+                          signal: controller.signal,
+                        });
+
+                        if (commitResponse.ok) {
+                          const commitData = await commitResponse.json();
+                          const latestCommit = Array.isArray(commitData)
+                            ? commitData[0]
+                            : commitData;
+
+                          if (latestCommit) {
+                            return latestCommit.committed_date;
+                          }
+                        }
+                      }
+                    } else if (hostname === "bitbucket.org") {
+                      const apiBase = "https://api.bitbucket.org/2.0";
+                      const repoUrl = `${apiBase}/repositories/${owner}/${repo}`;
+
+                      const repoResponse = await fetch(repoUrl, {
+                        signal: controller.signal,
+                      });
+
+                      if (repoResponse.ok) {
+                        const repoData = await repoResponse.json();
+                        const defaultBranch = repoData.mainbranch || "main";
+                        const commitsUrl = `${repoUrl}/commits/${defaultBranch}`;
+
+                        const commitResponse = await fetch(commitsUrl, {
+                          signal: controller.signal,
+                        });
+
+                        if (commitResponse.ok) {
+                          const commitData = await commitResponse.json();
+                          const latestCommit = commitData.values
+                            ? commitData.values[0]
+                            : null;
+
+                          if (latestCommit) {
+                            return latestCommit.date;
+                          }
                         }
                       }
                     }
-                  }
+                    return undefined;
+                  })();
+
+                  lastCommitDate = await commitDatePromise;
                 }
               } catch (e) {
                 console.error("Failed to fetch commit date", e);
@@ -603,13 +608,11 @@ export default function Home() {
             });
           } catch (fetchError) {
             if (cancelled || controller.signal.aborted) {
-              break;
+              return;
             }
 
             console.error(fetchError);
-            console.log(
-              `Failed to fetch data for ${initialPackages[index].name}, url: ${npmUrl}`
-            );
+            console.log(`Failed to fetch data for ${pkg.name}, url: ${npmUrl}`);
 
             setPackages((prev) => {
               if (cancelled || index >= prev.length) {
@@ -629,7 +632,11 @@ export default function Home() {
               return next;
             });
           }
-        }
+        };
+
+        await Promise.all(
+          initialPackages.map((pkg, index) => fetchPackageData(pkg, index))
+        );
       } catch {
         setPackages([]);
         setError("not valid json");
