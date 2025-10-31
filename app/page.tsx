@@ -7,6 +7,7 @@ import {
   CircleAlert,
   CircleQuestionMark,
   TriangleAlert,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -31,6 +32,7 @@ type PackageInfo = {
   gitUrl?: string;
   loading: boolean;
   npmUrl?: string;
+  humanReadableNpmUrl?: string;
   localOnly?: boolean;
   lastCommitDate?: string;
 };
@@ -389,6 +391,51 @@ function formatTimeSince(dateString: string): string {
   }
 }
 
+function normalizeGitUrl(gitUrl: string): string | undefined {
+  if (!gitUrl || typeof gitUrl !== "string") {
+    return undefined;
+  }
+
+  let normalized = gitUrl.trim();
+
+  if (normalized.startsWith("git+")) {
+    normalized = normalized.substring(4);
+  }
+
+  if (normalized.startsWith("git://")) {
+    normalized = normalized.replace(/^git:\/\//, "https://");
+  }
+
+  if (normalized.startsWith("git@")) {
+    const sshMatch = normalized.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+    if (sshMatch) {
+      const [, host, path] = sshMatch;
+      normalized = `https://${host}/${path}`;
+    } else {
+      return undefined;
+    }
+  }
+
+  if (normalized.endsWith(".git")) {
+    normalized = normalized.substring(0, normalized.length - 4);
+  }
+
+  try {
+    new URL(normalized);
+    return normalized;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeNpmUrl(packageName: string, version?: string): string {
+  const cleanName = packageName.trim();
+  const cleanVersion = version?.trim() ?? "latest";
+  return `https://www.npmjs.com/package/${encodeURIComponent(
+    cleanName
+  )}/v/${encodeURIComponent(cleanVersion)}`;
+}
+
 export default function Home() {
   const [packageString, setPackageString] = useState("");
   const [packages, setPackages] = useState<PackageInfo[]>([]);
@@ -468,29 +515,17 @@ export default function Home() {
               return;
             }
 
-            const gitUrl =
+            const rawGitUrl =
               payload.repository?.type === "git"
                 ? (payload.repository?.url as string | undefined)
                 : undefined;
 
+            const gitUrl = rawGitUrl ? normalizeGitUrl(rawGitUrl) : undefined;
+
             let lastCommitDate: string | undefined;
             if (gitUrl && !cancelled) {
               try {
-                let normalizedUrl = gitUrl;
-                if (gitUrl.startsWith("git+")) {
-                  normalizedUrl = gitUrl.substring(4);
-                }
-                if (gitUrl.startsWith("git@")) {
-                  const sshMatch = gitUrl.match(/^git@([^:]+):(.+)\.git$/);
-                  if (sshMatch) {
-                    const [, host, path] = sshMatch;
-                    normalizedUrl = `https://${host}/${path}`;
-                  } else {
-                    throw new Error("Unsupported SSH git URL format");
-                  }
-                }
-
-                const url = new URL(normalizedUrl);
+                const url = new URL(gitUrl);
                 const hostname = url.hostname;
                 const pathParts = url.pathname.split("/").filter(Boolean);
 
@@ -601,6 +636,7 @@ export default function Home() {
                   dummyResponse: payload,
                 },
                 npmUrl: npmUrl,
+                humanReadableNpmUrl: normalizeNpmUrl(pkg.name, pkg.version),
                 gitUrl: gitUrl,
                 lastCommitDate: lastCommitDate,
               };
@@ -663,7 +699,19 @@ export default function Home() {
         />
       </div>
       <div className="border border-border p-4 col-span-1">
-        <h1 className="mb-2">Packages ({packages.length})</h1>
+        <h1 className="mb-2 flex flex-row justify-between">
+          Packages ({packages.length}){" "}
+          {packages.some((p) => p.loading) ? (
+            <span>
+              Loading data
+              <Spinner className="inline-block ml-1" />
+            </span>
+          ) : packages.length > 0 ? (
+            <span>
+              Done <Check className="inline-block ml-1" />
+            </span>
+          ) : null}
+        </h1>
         <div className="flex flex-col gap-2">
           {error ? (
             <div className="p-2 border border-border text-sm text-red-600">
@@ -701,14 +749,25 @@ export default function Home() {
                 const monthsAgo = pkg.lastCommitDate
                   ? getMonthsAgo(pkg.lastCommitDate)
                   : null;
+                const hasGitUrl =
+                  !!pkg.gitUrl && !pkg.loading && !pkg.localOnly;
+                const hasNPMUrl =
+                  !!pkg.humanReadableNpmUrl && !pkg.loading && !pkg.localOnly;
+                const hasCommitDate = monthsAgo !== null;
+                const showCommitBadge = hasCommitDate;
+                const showUnknownBadge =
+                  !hasCommitDate && !pkg.loading && (hasGitUrl || hasNPMUrl);
+                const showRepoLink = hasGitUrl;
+                const showNPMLink = hasNPMUrl;
 
                 return (
                   <div
                     key={pkg.id}
-                    className="p-2 border border-border flex items-start gap-2"
+                    className="p-2 border border-border grid grid-cols-2 gap-4 items-start"
                   >
-                    <div className="font-medium flex-1">
+                    <div className="font-medium text-left">
                       {pkg.name}
+                      <br />
                       {pkg.version && (
                         <span className="text-sm text-muted-foreground">
                           {" v" + pkg.version}
@@ -716,61 +775,63 @@ export default function Home() {
                       )}
                     </div>
 
-                    {pkg.loading && (
-                      <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap shrink-0 h-full flex items-center border border-border">
-                        Loading
-                        <Spinner className="inline-block ml-1" />
-                      </span>
-                    )}
-                    {pkg.gitUrl && monthsAgo !== null && (
-                      <>
-                        {monthsAgo > 18 && (
-                          <Link
-                            href={pkg.gitUrl}
-                            className="text-sm bg-red-200 text-red-800 px-2 py-1 shrink-0 border border-red-800"
-                          >
-                            {formatTimeSince(pkg.lastCommitDate!)}
-                            <TriangleAlert className="inline-block ml-1 size-4" />
-                          </Link>
-                        )}
-                        {monthsAgo > 6 && monthsAgo <= 18 && (
-                          <Link
-                            href={pkg.gitUrl}
-                            className="text-sm bg-yellow-200 text-yellow-800 px-2 py-1 shrink-0 border border-yellow-800"
-                          >
-                            {formatTimeSince(pkg.lastCommitDate!)}
-                            <CircleAlert className="inline-block ml-1 size-4" />
-                          </Link>
-                        )}
-                        {monthsAgo <= 6 && (
-                          <Link
-                            href={pkg.gitUrl}
-                            className="text-sm bg-green-200 text-green-800 px-2 py-1 shrink-0 border border-green-800"
-                          >
-                            {formatTimeSince(pkg.lastCommitDate!)}
-                            <Check className="inline-block ml-1 size-4" />
-                          </Link>
-                        )}
-                      </>
-                    )}
-                    {monthsAgo === null &&
-                      pkg.gitUrl &&
-                      !pkg.loading &&
-                      !pkg.localOnly && (
-                        <Link
-                          href={pkg.gitUrl}
-                          className="text-sm text-secondary-foreground bg-secondary px-2 py-1 shrink-0 border border-border"
+                    <div className="flex flex-col items-end gap-2">
+                      {pkg.loading && (
+                        <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap h-full flex items-center border border-border">
+                          Loading
+                          <Spinner className="inline-block ml-1" />
+                        </span>
+                      )}
+                      {showCommitBadge && (
+                        <span
+                          className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
+                            monthsAgo! > 18
+                              ? "bg-red-200 text-red-800 border-red-800"
+                              : monthsAgo! > 6
+                              ? "bg-yellow-200 text-yellow-800 border-yellow-800"
+                              : "bg-green-200 text-green-800 border-green-800"
+                          }`}
                         >
+                          {formatTimeSince(pkg.lastCommitDate!)}
+                          {monthsAgo! > 18 ? (
+                            <TriangleAlert className="size-4" />
+                          ) : monthsAgo! > 6 ? (
+                            <CircleAlert className="size-4" />
+                          ) : (
+                            <Check className="size-4" />
+                          )}
+                        </span>
+                      )}
+                      {showUnknownBadge && (
+                        <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border flex items-center justify-end gap-1">
                           Unknown
-                          <CircleQuestionMark className="inline-block ml-1 size-4" />
+                          <CircleQuestionMark className="size-4" />
+                        </span>
+                      )}
+                      {showRepoLink && (
+                        <Link
+                          href={pkg.gitUrl!}
+                          className="text-sm text-blue-600 underline flex items-center gap-1"
+                        >
+                          Repo
+                          <ExternalLink className="size-3" />
                         </Link>
                       )}
-                    {!pkg.loading && pkg.localOnly && (
-                      <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 shrink-0 border border-border">
-                        Local only
-                        <CircleQuestionMark className="inline-block ml-1 size-4" />
-                      </span>
-                    )}
+                      {showNPMLink && (
+                        <Link
+                          href={pkg.humanReadableNpmUrl!}
+                          className="text-sm text-blue-600 underline flex items-center gap-1"
+                        >
+                          NPM
+                          <ExternalLink className="size-3" />
+                        </Link>
+                      )}
+                      {!pkg.loading && pkg.localOnly && (
+                        <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border">
+                          Local only
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })
