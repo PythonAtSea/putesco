@@ -1,6 +1,7 @@
 "use client";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Check,
@@ -35,6 +36,7 @@ type PackageInfo = {
   humanReadableNpmUrl?: string;
   localOnly?: boolean;
   lastCommitDate?: string;
+  isExplicit?: boolean;
 };
 
 function extractPackages(lockFile: unknown): PackageInfo[] {
@@ -323,7 +325,23 @@ function extractPackages(lockFile: unknown): PackageInfo[] {
 
   const lockRecord = lockFile as Record<string, unknown>;
 
+  const explicitDeps = new Set<string>();
   const packagesSection = lockRecord["packages"];
+  if (isRecord(packagesSection)) {
+    const rootPackage = packagesSection[""];
+    if (isRecord(rootPackage)) {
+      const deps = rootPackage["dependencies"];
+      const devDeps = rootPackage["devDependencies"];
+
+      if (isRecord(deps)) {
+        Object.keys(deps).forEach((name) => explicitDeps.add(name));
+      }
+      if (isRecord(devDeps)) {
+        Object.keys(devDeps).forEach((name) => explicitDeps.add(name));
+      }
+    }
+  }
+
   if (packagesSection) {
     collectPackages(packagesSection);
   }
@@ -343,6 +361,7 @@ function extractPackages(lockFile: unknown): PackageInfo[] {
     const key = `${pkg.name}__${pkg.version ?? ""}`;
     const existing = dedupByNameAndVersion.get(key);
     if (!existing) {
+      pkg.isExplicit = explicitDeps.has(pkg.name);
       dedupByNameAndVersion.set(key, pkg);
     } else {
       mergePackageFields(existing, pkg);
@@ -440,6 +459,7 @@ export default function Home() {
   const [packageString, setPackageString] = useState("");
   const [packages, setPackages] = useState<PackageInfo[]>([]);
   const [error, setError] = useState("");
+  const [showExplicitOnly, setShowExplicitOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -712,6 +732,17 @@ export default function Home() {
             </span>
           ) : null}
         </h1>
+        <div className="flex items-center gap-2 mb-4">
+          <Switch
+            id="explicit-only"
+            checked={showExplicitOnly}
+            onCheckedChange={setShowExplicitOnly}
+          />
+          <Label htmlFor="explicit-only" className="cursor-pointer">
+            Show only explicit dependencies (
+            {packages.filter((p) => p.isExplicit).length})
+          </Label>
+        </div>
         <div className="flex flex-col gap-2">
           {error ? (
             <div className="p-2 border border-border text-sm text-red-600">
@@ -723,6 +754,7 @@ export default function Home() {
             </div>
           ) : (
             [...packages]
+              .filter((pkg) => !showExplicitOnly || pkg.isExplicit)
               .sort((a, b) => {
                 const dateA = a.lastCommitDate
                   ? new Date(a.lastCommitDate).getTime()
