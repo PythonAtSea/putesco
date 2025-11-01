@@ -744,7 +744,6 @@ export default function Home() {
 
             setAuditSummary(auditData.summary);
 
-            // Map vulnerabilities to packages
             if (
               auditData.advisoriesByPackage &&
               typeof auditData.advisoriesByPackage === "object"
@@ -789,8 +788,8 @@ export default function Home() {
   }, [packageString]);
 
   return (
-    <div className="grid-cols-3 grid gap-4">
-      <div className="border border-border p-4 col-span-2 h-fit">
+    <div className="grid grid-cols-2 gap-4">
+      <div className="border border-border p-4 h-fit">
         <Label className="mb-2">Paste your requirements file:</Label>
         <Textarea
           className="resize-none h-60 overflow-y-scroll"
@@ -798,8 +797,56 @@ export default function Home() {
           spellCheck={false}
           onChange={(e) => setPackageString(e.target.value)}
         />
+
+        {auditSummary && (
+          <div className="border border-border p-4 mt-4 bg-card">
+            <h2 className="mb-4 font-semibold">Vulnerability Summary</h2>
+            <div className="grid grid-cols-5 gap-4">
+              {auditSummary.critical > 0 && (
+                <div className="border border-red-800 bg-red-200 text-red-800 p-3">
+                  <div className="text-2xl font-bold">
+                    {auditSummary.critical}
+                  </div>
+                  <div className="text-sm">Critical</div>
+                </div>
+              )}
+              {auditSummary.high > 0 && (
+                <div className="border border-orange-800 bg-orange-200 text-orange-800 p-3">
+                  <div className="text-2xl font-bold">{auditSummary.high}</div>
+                  <div className="text-sm">High</div>
+                </div>
+              )}
+              {auditSummary.moderate > 0 && (
+                <div className="border border-yellow-800 bg-yellow-200 text-yellow-800 p-3">
+                  <div className="text-2xl font-bold">
+                    {auditSummary.moderate}
+                  </div>
+                  <div className="text-sm">Moderate</div>
+                </div>
+              )}
+              {auditSummary.low > 0 && (
+                <div className="border border-blue-800 bg-blue-200 text-blue-800 p-3">
+                  <div className="text-2xl font-bold">{auditSummary.low}</div>
+                  <div className="text-sm">Low</div>
+                </div>
+              )}
+              {auditSummary.info > 0 && (
+                <div className="border border-gray-800 bg-gray-200 text-gray-800 p-3">
+                  <div className="text-2xl font-bold">{auditSummary.info}</div>
+                  <div className="text-sm">Info</div>
+                </div>
+              )}
+              {Object.values(auditSummary).every((v) => v === 0) && (
+                <div className="border border-green-800 bg-green-200 text-green-800 p-3 col-span-5">
+                  <div className="text-center">No vulnerabilities found</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-      <div className="border border-border p-4 col-span-1">
+
+      <div className="border border-border p-4">
         <h1 className="mb-2 flex flex-row justify-between">
           Packages ({packages.length}){" "}
           {packages.some((p) => p.loading) ? (
@@ -824,7 +871,7 @@ export default function Home() {
             {packages.filter((p) => p.isExplicit).length})
           </Label>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 row-span-2">
           {error ? (
             <div className="p-2 border border-border text-sm text-red-600">
               {error}
@@ -879,7 +926,7 @@ export default function Home() {
                 return (
                   <div
                     key={pkg.id}
-                    className="p-2 border border-border grid grid-cols-2 gap-4 items-start"
+                    className="p-2 border border-border grid grid-cols-2 gap-4 items-start bg-card"
                   >
                     <div className="font-medium text-left">
                       {pkg.name}
@@ -971,52 +1018,6 @@ export default function Home() {
           )}
         </div>
       </div>
-      {auditSummary && (
-        <div className="border border-border p-4 col-span-2">
-          <h2 className="mb-4 font-semibold">Vulnerability Summary</h2>
-          <div className="grid grid-cols-5 gap-4">
-            {auditSummary.critical > 0 && (
-              <div className="border border-red-800 bg-red-200 text-red-800 p-3">
-                <div className="text-2xl font-bold">
-                  {auditSummary.critical}
-                </div>
-                <div className="text-sm">Critical</div>
-              </div>
-            )}
-            {auditSummary.high > 0 && (
-              <div className="border border-orange-800 bg-orange-200 text-orange-800 p-3">
-                <div className="text-2xl font-bold">{auditSummary.high}</div>
-                <div className="text-sm">High</div>
-              </div>
-            )}
-            {auditSummary.moderate > 0 && (
-              <div className="border border-yellow-800 bg-yellow-200 text-yellow-800 p-3">
-                <div className="text-2xl font-bold">
-                  {auditSummary.moderate}
-                </div>
-                <div className="text-sm">Moderate</div>
-              </div>
-            )}
-            {auditSummary.low > 0 && (
-              <div className="border border-blue-800 bg-blue-200 text-blue-800 p-3">
-                <div className="text-2xl font-bold">{auditSummary.low}</div>
-                <div className="text-sm">Low</div>
-              </div>
-            )}
-            {auditSummary.info > 0 && (
-              <div className="border border-gray-800 bg-gray-200 text-gray-800 p-3">
-                <div className="text-2xl font-bold">{auditSummary.info}</div>
-                <div className="text-sm">Info</div>
-              </div>
-            )}
-            {Object.values(auditSummary).every((v) => v === 0) && (
-              <div className="border border-green-800 bg-green-200 text-green-800 p-3 col-span-5">
-                <div className="text-center">No vulnerabilities found</div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
