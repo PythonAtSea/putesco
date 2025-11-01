@@ -789,7 +789,7 @@ export default function Home() {
 
   return (
     <div className="grid grid-cols-2 gap-4">
-      <div className="border border-border p-4 h-fit">
+      <div className="border border-border p-4 h-fit bg-background">
         <Label className="mb-2">Paste your requirements file:</Label>
         <Textarea
           className="resize-none h-60 overflow-y-scroll"
@@ -846,7 +846,7 @@ export default function Home() {
         )}
       </div>
 
-      <div className="border border-border p-4">
+      <div className="border border-border p-4 bg-background">
         <h1 className="mb-2 flex flex-row justify-between">
           Packages ({packages.length}){" "}
           {packages.some((p) => p.loading) ? (

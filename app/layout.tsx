@@ -34,7 +34,7 @@ export default function RootLayout({
           defaultTheme="dark"
           disableTransitionOnChange
         >
-          <header className="p-6 border-b border-border flex flex-row justify-between items-center">
+          <header className="p-6 border-b border-border flex flex-row justify-between items-center bg-background">
             <h1 className="text-2xl">Putesco</h1>
             <ThemeButton />
           </header>
