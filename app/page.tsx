@@ -37,6 +37,16 @@ type PackageInfo = {
   localOnly?: boolean;
   lastCommitDate?: string;
   isExplicit?: boolean;
+  vulnerabilityCount?: number;
+  vulnerabilitySeverity?: "critical" | "high" | "moderate" | "low" | "info";
+};
+
+type AuditSummary = {
+  critical: number;
+  high: number;
+  moderate: number;
+  low: number;
+  info: number;
 };
 
 function extractPackages(lockFile: unknown): PackageInfo[] {
@@ -460,6 +470,7 @@ export default function Home() {
   const [packages, setPackages] = useState<PackageInfo[]>([]);
   const [error, setError] = useState("");
   const [showExplicitOnly, setShowExplicitOnly] = useState(false);
+  const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -693,6 +704,76 @@ export default function Home() {
         await Promise.all(
           initialPackages.map((pkg, index) => fetchPackageData(pkg, index))
         );
+
+        const performAudit = async () => {
+          if (cancelled) {
+            return;
+          }
+
+          try {
+            const auditPackages: Record<string, string> = {};
+            for (const pkg of extracted) {
+              if (pkg.name && pkg.version) {
+                auditPackages[pkg.name] = pkg.version;
+              }
+            }
+
+            if (Object.keys(auditPackages).length === 0) {
+              return;
+            }
+
+            const auditResponse = await fetch("/api/npm-vulnerabilities", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ packages: auditPackages }),
+              signal: controller.signal,
+            });
+
+            if (!auditResponse.ok) {
+              console.error("Audit failed:", auditResponse.status);
+              return;
+            }
+
+            const auditData = await auditResponse.json();
+
+            if (cancelled) {
+              return;
+            }
+
+            setAuditSummary(auditData.summary);
+
+            // Map vulnerabilities to packages
+            if (
+              auditData.advisoriesByPackage &&
+              typeof auditData.advisoriesByPackage === "object"
+            ) {
+              setPackages((prev) => {
+                return prev.map((pkg) => {
+                  const vulnInfo = auditData.advisoriesByPackage[pkg.name];
+                  return {
+                    ...pkg,
+                    vulnerabilityCount: vulnInfo?.count,
+                    vulnerabilitySeverity: vulnInfo?.severity as
+                      | "critical"
+                      | "high"
+                      | "moderate"
+                      | "low"
+                      | "info"
+                      | undefined,
+                  };
+                });
+              });
+            }
+          } catch (auditError) {
+            if (!cancelled && !controller.signal.aborted) {
+              console.error("Audit error:", auditError);
+            }
+          }
+        };
+
+        await performAudit();
       } catch {
         setPackages([]);
         setError("not valid json");
@@ -791,6 +872,9 @@ export default function Home() {
                   !hasCommitDate && !pkg.loading && (hasGitUrl || hasNPMUrl);
                 const showRepoLink = hasGitUrl;
                 const showNPMLink = hasNPMUrl;
+                const hasVulnerabilities =
+                  pkg.vulnerabilityCount !== undefined &&
+                  pkg.vulnerabilityCount > 0;
 
                 return (
                   <div
@@ -812,6 +896,23 @@ export default function Home() {
                         <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap h-full flex items-center border border-border">
                           Loading
                           <Spinner className="inline-block ml-1" />
+                        </span>
+                      )}
+                      {hasVulnerabilities && (
+                        <span
+                          className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
+                            pkg.vulnerabilitySeverity === "critical"
+                              ? "bg-red-200 text-red-800 border-red-800"
+                              : pkg.vulnerabilitySeverity === "high"
+                              ? "bg-orange-200 text-orange-800 border-orange-800"
+                              : pkg.vulnerabilitySeverity === "moderate"
+                              ? "bg-yellow-200 text-yellow-800 border-yellow-800"
+                              : "bg-blue-200 text-blue-800 border-blue-800"
+                          }`}
+                        >
+                          {pkg.vulnerabilityCount} vulnerability
+                          {pkg.vulnerabilityCount !== 1 ? "ies" : ""}
+                          <CircleAlert className="size-4" />
                         </span>
                       )}
                       {showCommitBadge && (
@@ -870,8 +971,52 @@ export default function Home() {
           )}
         </div>
       </div>
-      <div className="bg-green-500">3</div>
-      <div className="bg-yellow-500">4</div>
+      {auditSummary && (
+        <div className="border border-border p-4 col-span-2">
+          <h2 className="mb-4 font-semibold">Vulnerability Summary</h2>
+          <div className="grid grid-cols-5 gap-4">
+            {auditSummary.critical > 0 && (
+              <div className="border border-red-800 bg-red-200 text-red-800 p-3">
+                <div className="text-2xl font-bold">
+                  {auditSummary.critical}
+                </div>
+                <div className="text-sm">Critical</div>
+              </div>
+            )}
+            {auditSummary.high > 0 && (
+              <div className="border border-orange-800 bg-orange-200 text-orange-800 p-3">
+                <div className="text-2xl font-bold">{auditSummary.high}</div>
+                <div className="text-sm">High</div>
+              </div>
+            )}
+            {auditSummary.moderate > 0 && (
+              <div className="border border-yellow-800 bg-yellow-200 text-yellow-800 p-3">
+                <div className="text-2xl font-bold">
+                  {auditSummary.moderate}
+                </div>
+                <div className="text-sm">Moderate</div>
+              </div>
+            )}
+            {auditSummary.low > 0 && (
+              <div className="border border-blue-800 bg-blue-200 text-blue-800 p-3">
+                <div className="text-2xl font-bold">{auditSummary.low}</div>
+                <div className="text-sm">Low</div>
+              </div>
+            )}
+            {auditSummary.info > 0 && (
+              <div className="border border-gray-800 bg-gray-200 text-gray-800 p-3">
+                <div className="text-2xl font-bold">{auditSummary.info}</div>
+                <div className="text-sm">Info</div>
+              </div>
+            )}
+            {Object.values(auditSummary).every((v) => v === 0) && (
+              <div className="border border-green-800 bg-green-200 text-green-800 p-3 col-span-5">
+                <div className="text-center">No vulnerabilities found</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
