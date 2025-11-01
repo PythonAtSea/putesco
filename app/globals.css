@@ -133,5 +133,6 @@
       linear-gradient(0deg, var(--border) 1px, transparent 1px),
       linear-gradient(90deg, var(--border) 1px, transparent 1px);
     background-size: 40px 40px;
+    background-attachment: fixed;
   }
 }

@@ -398,6 +398,34 @@ function getMonthsAgo(dateString: string): number {
   return diffMs / (1000 * 60 * 60 * 24 * 30.44);
 }
 
+function getOutdatedSeverity(
+  pkg: PackageInfo
+): "low" | "moderate" | "high" | "critical" {
+  if (!pkg.latest || !pkg.version || pkg.latest === pkg.version) {
+    return "low";
+  }
+
+  const currentParts = pkg.version.split(".").map((n) => parseInt(n) || 0);
+  const latestParts = pkg.latest.split(".").map((n) => parseInt(n) || 0);
+
+  const majorDiff = latestParts[0] - currentParts[0];
+  const minorDiff = latestParts[1] - currentParts[1];
+
+  if (majorDiff > 0) {
+    return "critical";
+  }
+
+  if (minorDiff > 2) {
+    return "high";
+  }
+
+  if (minorDiff > 0) {
+    return "moderate";
+  }
+
+  return "low";
+}
+
 function formatTimeSince(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -890,6 +918,22 @@ export default function Home() {
             [...packages]
               .filter((pkg) => !showExplicitOnly || pkg.isExplicit)
               .sort((a, b) => {
+                const severityOrder = {
+                  critical: 4,
+                  high: 3,
+                  moderate: 2,
+                  low: 1,
+                };
+
+                const aSeverity = getOutdatedSeverity(a);
+                const bSeverity = getOutdatedSeverity(b);
+                const severityDiff =
+                  severityOrder[bSeverity] - severityOrder[aSeverity];
+
+                if (severityDiff !== 0) {
+                  return severityDiff;
+                }
+
                 const dateA = a.lastCommitDate
                   ? new Date(a.lastCommitDate).getTime()
                   : Infinity;
@@ -930,6 +974,7 @@ export default function Home() {
                   pkg.vulnerabilityCount > 0;
                 const isOutdated =
                   pkg.latest && pkg.version && pkg.latest !== pkg.version;
+                const outdatedSeverity = getOutdatedSeverity(pkg);
 
                 return (
                   <div
@@ -944,16 +989,24 @@ export default function Home() {
                           {" v" + pkg.version}
                         </span>
                       )}
-                      <span className="inline-block size-2 mx-2.5 bg-muted-foreground border border-border"></span>
+
                       {isOutdated && (
-                        <span className="text-sm text-orange-500">
-                          Latest: v{pkg.latest}
-                        </span>
-                      )}
-                      {!isOutdated && pkg.latest && (
-                        <span className="text-sm text-green-500">
-                          Up to date
-                        </span>
+                        <>
+                          <span className="inline-block size-2 mx-2.5 bg-muted-foreground border border-border" />
+                          <span
+                            className={`text-sm ${
+                              outdatedSeverity === "critical"
+                                ? "text-red-500"
+                                : outdatedSeverity === "high"
+                                ? "text-orange-500"
+                                : outdatedSeverity === "moderate"
+                                ? "text-yellow-500"
+                                : "text-blue-500"
+                            }`}
+                          >
+                            Latest: v{pkg.latest}
+                          </span>
+                        </>
                       )}
                     </div>
 
