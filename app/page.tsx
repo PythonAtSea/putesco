@@ -17,6 +17,7 @@ type PackageInfo = {
   id: string;
   name: string;
   version?: string;
+  latest?: string;
   resolved?: string;
   integrity?: string;
   dev?: boolean;
@@ -529,10 +530,7 @@ export default function Home() {
             return;
           }
 
-          const npmUrl = `https://registry.npmjs.org/${pkg.name}/${
-            pkg.version ?? "latest"
-          }`;
-
+          const npmUrl = `https://registry.npmjs.org/${pkg.name}`;
           try {
             const response = await fetch(npmUrl, { signal: controller.signal });
 
@@ -540,11 +538,17 @@ export default function Home() {
               throw new Error(`Request failed with status ${response.status}`);
             }
 
-            const payload = await response.json();
+            const rawPayload = await response.json();
 
             if (cancelled) {
               return;
             }
+
+            const payload = pkg.version
+              ? rawPayload.versions?.[pkg.version]
+              : undefined;
+
+            const latestVersion = rawPayload["dist-tags"]?.latest;
 
             const rawGitUrl =
               payload.repository?.type === "git"
@@ -662,6 +666,7 @@ export default function Home() {
               next[index] = {
                 ...current,
                 loading: false,
+                latest: latestVersion,
                 raw: {
                   ...(current.raw ?? {}),
                   dummyResponse: payload,
@@ -798,7 +803,7 @@ export default function Home() {
           onChange={(e) => setPackageString(e.target.value)}
         />
 
-        {auditSummary && (
+        {auditSummary && packages.length > 0 && (
           <div className="border border-border p-4 mt-4 bg-card">
             <h2 className="mb-4 font-semibold">Vulnerability Summary</h2>
             <div className="grid grid-cols-5 gap-4">
@@ -851,7 +856,8 @@ export default function Home() {
           Packages ({packages.length}){" "}
           {packages.some((p) => p.loading) ? (
             <span>
-              Loading data
+              Loading ({packages.filter((p) => !p.loading).length} done /{" "}
+              {packages.length})
               <Spinner className="inline-block ml-1" />
             </span>
           ) : packages.length > 0 ? (
@@ -922,6 +928,8 @@ export default function Home() {
                 const hasVulnerabilities =
                   pkg.vulnerabilityCount !== undefined &&
                   pkg.vulnerabilityCount > 0;
+                const isOutdated =
+                  pkg.latest && pkg.version && pkg.latest !== pkg.version;
 
                 return (
                   <div
@@ -934,6 +942,17 @@ export default function Home() {
                       {pkg.version && (
                         <span className="text-sm text-muted-foreground">
                           {" v" + pkg.version}
+                        </span>
+                      )}
+                      <span className="inline-block size-2 mx-2.5 bg-muted-foreground border border-border"></span>
+                      {isOutdated && (
+                        <span className="text-sm text-orange-500">
+                          Latest: v{pkg.latest}
+                        </span>
+                      )}
+                      {!isOutdated && pkg.latest && (
+                        <span className="text-sm text-green-500">
+                          Up to date
                         </span>
                       )}
                     </div>
