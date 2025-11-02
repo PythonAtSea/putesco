@@ -40,6 +40,7 @@ type PackageInfo = {
   isExplicit?: boolean;
   vulnerabilityCount?: number;
   vulnerabilitySeverity?: "critical" | "high" | "moderate" | "low" | "info";
+  license?: string;
 };
 
 type AuditSummary = {
@@ -583,6 +584,8 @@ export default function Home() {
                 ? (payload.repository?.url as string | undefined)
                 : undefined;
 
+            const license = payload.license || "unknown";
+
             const gitUrl = rawGitUrl ? normalizeGitUrl(rawGitUrl) : undefined;
 
             let lastCommitDate: string | undefined;
@@ -703,6 +706,7 @@ export default function Home() {
                 humanReadableNpmUrl: normalizeNpmUrl(pkg.name, pkg.version),
                 gitUrl: gitUrl,
                 lastCommitDate: lastCommitDate,
+                license: license,
               };
               return next;
             });
@@ -969,6 +973,7 @@ export default function Home() {
                   !hasCommitDate && !pkg.loading && (hasGitUrl || hasNPMUrl);
                 const showRepoLink = hasGitUrl;
                 const showNPMLink = hasNPMUrl;
+                const showLicense = pkg.license && pkg.license !== "unknown";
                 const hasVulnerabilities =
                   pkg.vulnerabilityCount !== undefined &&
                   pkg.vulnerabilityCount > 0;
@@ -983,6 +988,12 @@ export default function Home() {
                   >
                     <div className="font-medium text-left">
                       {pkg.name}
+                      {showLicense && (
+                        <>
+                          <span className="inline-block size-2 mx-2.5 bg-foreground" />
+                          {pkg.license} License
+                        </>
+                      )}
                       <br />
                       {pkg.version && (
                         <span className="text-sm text-muted-foreground">
@@ -992,7 +1003,7 @@ export default function Home() {
 
                       {isOutdated && (
                         <>
-                          <span className="inline-block size-2 mx-2.5 bg-muted-foreground border border-border" />
+                          <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
                           <span
                             className={`text-sm ${
                               outdatedSeverity === "critical"
