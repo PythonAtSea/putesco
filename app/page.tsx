@@ -46,6 +46,8 @@ type PackageInfo = {
   starCount?: number;
   homepageUrl?: string;
   isDeprecated?: boolean;
+  size?: number;
+  humanReadableSize?: string;
 };
 
 type AuditSummary = {
@@ -500,6 +502,18 @@ function normalizeNpmUrl(packageName: string, version?: string): string {
   )}/v/${encodeURIComponent(cleanVersion)}`;
 }
 
+function formatBytes(bytes: number): string {
+  if (typeof bytes !== "number" || Number.isNaN(bytes)) return "unknown";
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const value = bytes / Math.pow(k, i);
+  // show integer for bytes, one decimal place otherwise
+  const formatted = i === 0 ? Math.round(value).toString() : value.toFixed(1);
+  return `${formatted} ${sizes[i]}`;
+}
+
 export default function Home() {
   const [packageString, setPackageString] = useState("");
   const [packages, setPackages] = useState<PackageInfo[]>([]);
@@ -578,26 +592,31 @@ export default function Home() {
               return;
             }
 
+            // determine the latest version, then prefer the exact version payload if available;
+            // otherwise try the latest version payload
+            const latestVersion = rawPayload["dist-tags"]?.latest;
             const payload = pkg.version
               ? rawPayload.versions?.[pkg.version]
+              : latestVersion
+              ? rawPayload.versions?.[latestVersion]
               : undefined;
 
-            const latestVersion = rawPayload["dist-tags"]?.latest;
-
             const rawGitUrl =
-              payload.repository?.type === "git"
-                ? (payload.repository?.url as string | undefined)
+              payload?.repository?.type === "git"
+                ? (payload?.repository?.url as string | undefined)
                 : undefined;
 
-            const license = payload.license || "unknown";
+            const license = payload?.license ?? "unknown";
 
             const gitUrl = rawGitUrl ? normalizeGitUrl(rawGitUrl) : undefined;
 
-            const homepageUrl = payload.homepage;
+            const homepageUrl = payload?.homepage;
 
             let lastCommitDate: string | undefined;
             let starCount: number | undefined;
             let isDeprecated: boolean | undefined;
+            let packageSize: number | undefined;
+            let humanReadableSize: string | undefined;
             if (gitUrl && !cancelled) {
               try {
                 const url = new URL(gitUrl);
@@ -706,6 +725,21 @@ export default function Home() {
               }
             }
 
+            try {
+              const dist = payload?.dist ?? undefined;
+              if (dist) {
+                const unpacked = (dist as Record<string, unknown>)
+                  ?.unpackedSize as number | undefined;
+                const sizeField = (dist as Record<string, unknown>)?.size as
+                  | number
+                  | undefined;
+                packageSize = unpacked ?? sizeField ?? undefined;
+              }
+            } catch {}
+
+            if (packageSize !== undefined) {
+              humanReadableSize = formatBytes(packageSize);
+            }
             setPackages((prev) => {
               if (cancelled || index >= prev.length) {
                 return prev;
@@ -731,6 +765,8 @@ export default function Home() {
                 lastCommitDate: lastCommitDate,
                 license: license,
                 starCount: starCount,
+                size: packageSize,
+                humanReadableSize: humanReadableSize,
                 homepageUrl: homepageUrl,
                 isDeprecated: isDeprecated,
               };
@@ -1064,6 +1100,12 @@ export default function Home() {
                           </span>
                         </>
                       )}
+                      <br />
+                      {pkg.humanReadableSize && (
+                        <span className="text-muted-foreground text-sm">
+                          {pkg.humanReadableSize}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-col items-end gap-2">
@@ -1102,6 +1144,7 @@ export default function Home() {
                           <Star className="size-4" />
                         </span>
                       )}
+
                       {showCommitBadge && (
                         <span
                           className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
