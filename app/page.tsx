@@ -43,6 +43,7 @@ type PackageInfo = {
   vulnerabilitySeverity?: "critical" | "high" | "moderate" | "low" | "info";
   license?: string;
   starCount?: number;
+  homepageUrl?: string;
 };
 
 type AuditSummary = {
@@ -590,6 +591,8 @@ export default function Home() {
 
             const gitUrl = rawGitUrl ? normalizeGitUrl(rawGitUrl) : undefined;
 
+            const homepageUrl = payload.homepage;
+
             let lastCommitDate: string | undefined;
             let starCount: number | undefined;
             if (gitUrl && !cancelled) {
@@ -722,6 +725,7 @@ export default function Home() {
                 lastCommitDate: lastCommitDate,
                 license: license,
                 starCount: starCount,
+                homepageUrl: homepageUrl,
               };
               return next;
             });
@@ -1107,6 +1111,8 @@ export default function Home() {
                         <Link
                           href={pkg.gitUrl!}
                           className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
                           Repo
                           <ExternalLink className="size-3" />
@@ -1116,8 +1122,21 @@ export default function Home() {
                         <Link
                           href={pkg.humanReadableNpmUrl!}
                           className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
                           NPM
+                          <ExternalLink className="size-3" />
+                        </Link>
+                      )}
+                      {pkg.homepageUrl && (
+                        <Link
+                          href={pkg.homepageUrl}
+                          className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Homepage
                           <ExternalLink className="size-3" />
                         </Link>
                       )}
