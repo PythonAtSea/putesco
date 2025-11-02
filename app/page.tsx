@@ -987,14 +987,23 @@ export default function Home() {
                     className="p-2 border border-border grid grid-cols-2 gap-4 items-start bg-card"
                   >
                     <div className="font-medium text-left">
-                      {pkg.name}
-                      {showLicense && (
-                        <>
-                          <span className="inline-block size-2 mx-2.5 bg-foreground" />
-                          {pkg.license} License
-                        </>
-                      )}
-                      <br />
+                      <div className="flex items-center">
+                        <span className="truncate">{pkg.name}</span>
+                        {showLicense && (
+                          <>
+                            <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
+                            <Link
+                              href={`https://spdx.org/licenses/${pkg.license}.html`}
+                              className="text-sm text-blue-600 hover:underline flex items-center gap-1 whitespace-nowrap"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {pkg.license} License
+                              <ExternalLink className="size-3" />
+                            </Link>
+                          </>
+                        )}
+                      </div>
                       {pkg.version && (
                         <span className="text-sm text-muted-foreground">
                           {" v" + pkg.version}
@@ -1074,7 +1083,7 @@ export default function Home() {
                       {showRepoLink && (
                         <Link
                           href={pkg.gitUrl!}
-                          className="text-sm text-blue-600 underline flex items-center gap-1"
+                          className="text-sm text-blue-600 hover:underline flex items-center gap-1"
                         >
                           Repo
                           <ExternalLink className="size-3" />
@@ -1083,7 +1092,7 @@ export default function Home() {
                       {showNPMLink && (
                         <Link
                           href={pkg.humanReadableNpmUrl!}
-                          className="text-sm text-blue-600 underline flex items-center gap-1"
+                          className="text-sm text-blue-600 hover:underline flex items-center gap-1"
                         >
                           NPM
                           <ExternalLink className="size-3" />
