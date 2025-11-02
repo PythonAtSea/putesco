@@ -7,6 +7,7 @@ interface GitHubCommitRequest {
 
 interface GitHubCommitResponse {
   lastCommitDate?: string;
+  starCount?: number;
   error?: string;
 }
 
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
 
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || "main";
+    const starCount = repoData.stargazers_count;
 
     const commitsUrl = `${apiBase}/repos/${owner}/${repo}/commits/${defaultBranch}`;
     const commitResponse = await fetch(commitsUrl, {
@@ -66,7 +68,10 @@ export async function POST(request: NextRequest) {
       lastCommitDate = latestCommit.commit?.committer?.date;
     }
 
-    return NextResponse.json({ lastCommitDate } as GitHubCommitResponse);
+    return NextResponse.json({
+      lastCommitDate,
+      starCount,
+    } as GitHubCommitResponse);
   } catch (error) {
     console.error("GitHub API error:", error);
     return NextResponse.json(

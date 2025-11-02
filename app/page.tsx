@@ -9,6 +9,7 @@ import {
   CircleQuestionMark,
   TriangleAlert,
   ExternalLink,
+  Star,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -41,6 +42,7 @@ type PackageInfo = {
   vulnerabilityCount?: number;
   vulnerabilitySeverity?: "critical" | "high" | "moderate" | "low" | "info";
   license?: string;
+  starCount?: number;
 };
 
 type AuditSummary = {
@@ -589,6 +591,7 @@ export default function Home() {
             const gitUrl = rawGitUrl ? normalizeGitUrl(rawGitUrl) : undefined;
 
             let lastCommitDate: string | undefined;
+            let starCount: number | undefined;
             if (gitUrl && !cancelled) {
               try {
                 const url = new URL(gitUrl);
@@ -599,7 +602,7 @@ export default function Home() {
                   const owner = pathParts[0];
                   const repo = pathParts[1].replace(/\.git$/, "");
 
-                  const commitDatePromise = (async () => {
+                  const commitDataPromise = (async () => {
                     if (hostname === "github.com") {
                       const apiResponse = await fetch("/api/github-commit", {
                         method: "POST",
@@ -612,7 +615,10 @@ export default function Home() {
 
                       if (apiResponse.ok) {
                         const apiData = await apiResponse.json();
-                        return apiData.lastCommitDate;
+                        return {
+                          lastCommitDate: apiData.lastCommitDate,
+                          starCount: apiData.starCount,
+                        };
                       }
                     } else if (hostname === "gitlab.com") {
                       const apiBase = "https://gitlab.com/api/v4";
@@ -640,7 +646,10 @@ export default function Home() {
                             : commitData;
 
                           if (latestCommit) {
-                            return latestCommit.committed_date;
+                            return {
+                              lastCommitDate: latestCommit.committed_date,
+                              starCount: repoData.star_count,
+                            };
                           }
                         }
                       }
@@ -668,15 +677,20 @@ export default function Home() {
                             : null;
 
                           if (latestCommit) {
-                            return latestCommit.date;
+                            return {
+                              lastCommitDate: latestCommit.date,
+                              starCount: undefined,
+                            };
                           }
                         }
                       }
                     }
-                    return undefined;
+                    return { lastCommitDate: undefined, starCount: undefined };
                   })();
 
-                  lastCommitDate = await commitDatePromise;
+                  const result = await commitDataPromise;
+                  lastCommitDate = result.lastCommitDate;
+                  starCount = result.starCount;
                 }
               } catch (e) {
                 console.error("Failed to fetch commit date", e);
@@ -707,6 +721,7 @@ export default function Home() {
                 gitUrl: gitUrl,
                 lastCommitDate: lastCommitDate,
                 license: license,
+                starCount: starCount,
               };
               return next;
             });
@@ -980,6 +995,8 @@ export default function Home() {
                 const isOutdated =
                   pkg.latest && pkg.version && pkg.latest !== pkg.version;
                 const outdatedSeverity = getOutdatedSeverity(pkg);
+                const hasStarCount =
+                  pkg.starCount !== undefined && !pkg.loading && !pkg.localOnly;
 
                 return (
                   <div
@@ -1052,6 +1069,12 @@ export default function Home() {
                           {pkg.vulnerabilityCount} vulnerability
                           {pkg.vulnerabilityCount !== 1 ? "ies" : ""}
                           <CircleAlert className="size-4" />
+                        </span>
+                      )}
+                      {hasStarCount && (
+                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-yellow-200 text-yellow-800 border-yellow-800">
+                          {pkg.starCount!.toLocaleString()}
+                          <Star className="size-4" />
                         </span>
                       )}
                       {showCommitBadge && (
