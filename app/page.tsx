@@ -10,6 +10,7 @@ import {
   TriangleAlert,
   ExternalLink,
   Star,
+  Archive,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -44,6 +45,7 @@ type PackageInfo = {
   license?: string;
   starCount?: number;
   homepageUrl?: string;
+  isDeprecated?: boolean;
 };
 
 type AuditSummary = {
@@ -595,6 +597,7 @@ export default function Home() {
 
             let lastCommitDate: string | undefined;
             let starCount: number | undefined;
+            let isDeprecated: boolean | undefined;
             if (gitUrl && !cancelled) {
               try {
                 const url = new URL(gitUrl);
@@ -621,6 +624,7 @@ export default function Home() {
                         return {
                           lastCommitDate: apiData.lastCommitDate,
                           starCount: apiData.starCount,
+                          isArchived: apiData.isArchived,
                         };
                       }
                     } else if (hostname === "gitlab.com") {
@@ -694,6 +698,8 @@ export default function Home() {
                   const result = await commitDataPromise;
                   lastCommitDate = result.lastCommitDate;
                   starCount = result.starCount;
+                  isDeprecated = (result as { isArchived?: boolean })
+                    .isArchived;
                 }
               } catch (e) {
                 console.error("Failed to fetch commit date", e);
@@ -726,6 +732,7 @@ export default function Home() {
                 license: license,
                 starCount: starCount,
                 homepageUrl: homepageUrl,
+                isDeprecated: isDeprecated,
               };
               return next;
             });
@@ -941,6 +948,12 @@ export default function Home() {
             [...packages]
               .filter((pkg) => !showExplicitOnly || pkg.isExplicit)
               .sort((a, b) => {
+                const aArchived = a.isDeprecated && !a.loading && !a.localOnly;
+                const bArchived = b.isDeprecated && !b.loading && !b.localOnly;
+
+                if (aArchived && !bArchived) return -1;
+                if (!aArchived && bArchived) return 1;
+
                 const severityOrder = {
                   critical: 4,
                   high: 3,
@@ -1001,11 +1014,13 @@ export default function Home() {
                 const outdatedSeverity = getOutdatedSeverity(pkg);
                 const hasStarCount =
                   pkg.starCount !== undefined && !pkg.loading && !pkg.localOnly;
+                const isDeprecatedRepo =
+                  pkg.isDeprecated && !pkg.loading && !pkg.localOnly;
 
                 return (
                   <div
                     key={pkg.id}
-                    className="p-2 border border-border grid grid-cols-2 gap-4 items-start bg-card"
+                    className="p-2 border border-border grid grid-cols-[1fr_auto] gap-4 items-start bg-card overflow-hidden"
                   >
                     <div className="font-medium text-left">
                       <div className="flex items-center">
@@ -1073,6 +1088,12 @@ export default function Home() {
                           {pkg.vulnerabilityCount} vulnerability
                           {pkg.vulnerabilityCount !== 1 ? "ies" : ""}
                           <CircleAlert className="size-4" />
+                        </span>
+                      )}
+                      {isDeprecatedRepo && (
+                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-gray-200 text-gray-800 border-gray-800">
+                          Archived
+                          <Archive className="size-4" />
                         </span>
                       )}
                       {hasStarCount && (

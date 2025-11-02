@@ -8,6 +8,7 @@ interface GitHubCommitRequest {
 interface GitHubCommitResponse {
   lastCommitDate?: string;
   starCount?: number;
+  isArchived?: boolean;
   error?: string;
 }
 
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || "main";
     const starCount = repoData.stargazers_count;
+    const isArchived = repoData.archived || false;
 
     const commitsUrl = `${apiBase}/repos/${owner}/${repo}/commits/${defaultBranch}`;
     const commitResponse = await fetch(commitsUrl, {
@@ -71,6 +73,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       lastCommitDate,
       starCount,
+      isArchived,
     } as GitHubCommitResponse);
   } catch (error) {
     console.error("GitHub API error:", error);
