@@ -853,7 +853,7 @@ export default function Home() {
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="border border-border p-4 h-fit bg-background">
-        <Label className="mb-2">Paste your requirements file:</Label>
+        <Label className="mb-2">Paste your package-lock.json file:</Label>
         <Textarea
           className="resize-none h-60 overflow-y-scroll"
           value={packageString}
@@ -1091,7 +1091,7 @@ export default function Home() {
                         </span>
                       )}
                       {isDeprecatedRepo && (
-                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-gray-200 text-gray-800 border-gray-800">
+                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-purple-200 text-purple-800 border-purple-800">
                           Archived
                           <Archive className="size-4" />
                         </span>
