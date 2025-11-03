@@ -1136,7 +1136,7 @@ export default function Home() {
 
                     {pkg.humanReadableSize && (
                       <>
-                        <br />
+                        <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
                         <span className="text-muted-foreground text-sm">
                           {pkg.humanReadableSize}
                         </span>
