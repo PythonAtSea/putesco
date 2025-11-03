@@ -13,7 +13,7 @@ import {
   Archive,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type PackageInfo = {
   id: string;
@@ -57,6 +57,17 @@ type AuditSummary = {
   low: number;
   info: number;
 };
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(handle);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 function extractPackages(lockFile: unknown): PackageInfo[] {
   if (typeof lockFile !== "object" || lockFile === null) {
@@ -520,13 +531,75 @@ export default function Home() {
   const [error, setError] = useState("");
   const [showExplicitOnly, setShowExplicitOnly] = useState(false);
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
+  const debouncedPackageString = useDebouncedValue(packageString, 400);
+  const visiblePackages = useMemo(() => {
+    const severityOrder = {
+      critical: 4,
+      high: 3,
+      moderate: 2,
+      low: 1,
+    } as const;
+
+    const filtered = packages.filter(
+      (pkg) => !showExplicitOnly || pkg.isExplicit
+    );
+
+    filtered.sort((a, b) => {
+      const aArchived = a.isDeprecated && !a.loading && !a.localOnly;
+      const bArchived = b.isDeprecated && !b.loading && !b.localOnly;
+
+      if (aArchived && !bArchived) return -1;
+      if (!aArchived && bArchived) return 1;
+
+      const aSeverity = getOutdatedSeverity(a);
+      const bSeverity = getOutdatedSeverity(b);
+      const severityDiff = severityOrder[bSeverity] - severityOrder[aSeverity];
+
+      if (severityDiff !== 0) {
+        return severityDiff;
+      }
+
+      const dateA = a.lastCommitDate
+        ? new Date(a.lastCommitDate).getTime()
+        : Infinity;
+      const dateB = b.lastCommitDate
+        ? new Date(b.lastCommitDate).getTime()
+        : Infinity;
+      return dateA - dateB;
+    });
+
+    return filtered;
+  }, [packages, showExplicitOnly]);
+  const explicitCount = useMemo(() => {
+    let count = 0;
+    for (const pkg of packages) {
+      if (pkg.isExplicit) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [packages]);
+  const loadingStats = useMemo(() => {
+    let completedCount = 0;
+    let hasLoading = false;
+
+    for (const pkg of packages) {
+      if (pkg.loading) {
+        hasLoading = true;
+      } else {
+        completedCount += 1;
+      }
+    }
+
+    return { completedCount, hasLoading };
+  }, [packages]);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
     const processInput = async () => {
-      const trimmed = packageString.trim();
+      const trimmed = debouncedPackageString.trim();
       if (!trimmed) {
         setPackages([]);
         setError("");
@@ -534,7 +607,7 @@ export default function Home() {
       }
 
       try {
-        const parsed = JSON.parse(packageString);
+        const parsed = JSON.parse(debouncedPackageString);
         const extracted = extractPackages(parsed);
         if (extracted.length === 0) {
           setPackages([]);
@@ -884,7 +957,7 @@ export default function Home() {
       cancelled = true;
       controller.abort();
     };
-  }, [packageString]);
+  }, [debouncedPackageString]);
 
   return (
     <div className="grid grid-cols-2 gap-4">
@@ -948,10 +1021,9 @@ export default function Home() {
       <div className="border border-border p-4 bg-background">
         <h1 className="mb-2 flex flex-row justify-between">
           Packages ({packages.length}){" "}
-          {packages.some((p) => p.loading) ? (
+          {loadingStats.hasLoading ? (
             <span>
-              Loading ({packages.filter((p) => !p.loading).length} done /{" "}
-              {packages.length})
+              Loading ({loadingStats.completedCount} done / {packages.length})
               <Spinner className="inline-block ml-1" />
             </span>
           ) : packages.length > 0 ? (
@@ -967,8 +1039,7 @@ export default function Home() {
             onCheckedChange={setShowExplicitOnly}
           />
           <Label htmlFor="explicit-only" className="cursor-pointer">
-            Show only explicit dependencies (
-            {packages.filter((p) => p.isExplicit).length})
+            Show only explicit dependencies ({explicitCount})
           </Label>
         </div>
         <div className="flex flex-col gap-2 row-span-2">
@@ -981,196 +1052,100 @@ export default function Home() {
               No packages to display yet.
             </div>
           ) : (
-            [...packages]
-              .filter((pkg) => !showExplicitOnly || pkg.isExplicit)
-              .sort((a, b) => {
-                const aArchived = a.isDeprecated && !a.loading && !a.localOnly;
-                const bArchived = b.isDeprecated && !b.loading && !b.localOnly;
+            visiblePackages.map((pkg) => {
+              const flagParts: string[] = [];
+              if (pkg.dev !== undefined) {
+                flagParts.push(`dev: ${pkg.dev ? "true" : "false"}`);
+              }
+              if (pkg.optional !== undefined) {
+                flagParts.push(`optional: ${pkg.optional ? "true" : "false"}`);
+              }
+              if (pkg.peer !== undefined) {
+                flagParts.push(`peer: ${pkg.peer ? "true" : "false"}`);
+              }
 
-                if (aArchived && !bArchived) return -1;
-                if (!aArchived && bArchived) return 1;
+              const monthsAgo = pkg.lastCommitDate
+                ? getMonthsAgo(pkg.lastCommitDate)
+                : null;
+              const hasGitUrl = !!pkg.gitUrl && !pkg.loading && !pkg.localOnly;
+              const hasNPMUrl =
+                !!pkg.humanReadableNpmUrl && !pkg.loading && !pkg.localOnly;
+              const hasCommitDate = monthsAgo !== null;
+              const showCommitBadge = hasCommitDate;
+              const showUnknownBadge =
+                !hasCommitDate && !pkg.loading && (hasGitUrl || hasNPMUrl);
+              const showRepoLink = hasGitUrl;
+              const showNPMLink = hasNPMUrl;
+              const showLicense = pkg.license && pkg.license !== "unknown";
+              const hasVulnerabilities =
+                pkg.vulnerabilityCount !== undefined &&
+                pkg.vulnerabilityCount > 0;
+              const isOutdated =
+                pkg.latest && pkg.version && pkg.latest !== pkg.version;
+              const outdatedSeverity = getOutdatedSeverity(pkg);
+              const hasStarCount =
+                pkg.starCount !== undefined && !pkg.loading && !pkg.localOnly;
+              const isDeprecatedRepo =
+                pkg.isDeprecated && !pkg.loading && !pkg.localOnly;
 
-                const severityOrder = {
-                  critical: 4,
-                  high: 3,
-                  moderate: 2,
-                  low: 1,
-                };
-
-                const aSeverity = getOutdatedSeverity(a);
-                const bSeverity = getOutdatedSeverity(b);
-                const severityDiff =
-                  severityOrder[bSeverity] - severityOrder[aSeverity];
-
-                if (severityDiff !== 0) {
-                  return severityDiff;
-                }
-
-                const dateA = a.lastCommitDate
-                  ? new Date(a.lastCommitDate).getTime()
-                  : Infinity;
-                const dateB = b.lastCommitDate
-                  ? new Date(b.lastCommitDate).getTime()
-                  : Infinity;
-                return dateA - dateB;
-              })
-              .map((pkg) => {
-                const flagParts: string[] = [];
-                if (pkg.dev !== undefined) {
-                  flagParts.push(`dev: ${pkg.dev ? "true" : "false"}`);
-                }
-                if (pkg.optional !== undefined) {
-                  flagParts.push(
-                    `optional: ${pkg.optional ? "true" : "false"}`
-                  );
-                }
-                if (pkg.peer !== undefined) {
-                  flagParts.push(`peer: ${pkg.peer ? "true" : "false"}`);
-                }
-
-                const monthsAgo = pkg.lastCommitDate
-                  ? getMonthsAgo(pkg.lastCommitDate)
-                  : null;
-                const hasGitUrl =
-                  !!pkg.gitUrl && !pkg.loading && !pkg.localOnly;
-                const hasNPMUrl =
-                  !!pkg.humanReadableNpmUrl && !pkg.loading && !pkg.localOnly;
-                const hasCommitDate = monthsAgo !== null;
-                const showCommitBadge = hasCommitDate;
-                const showUnknownBadge =
-                  !hasCommitDate && !pkg.loading && (hasGitUrl || hasNPMUrl);
-                const showRepoLink = hasGitUrl;
-                const showNPMLink = hasNPMUrl;
-                const showLicense = pkg.license && pkg.license !== "unknown";
-                const hasVulnerabilities =
-                  pkg.vulnerabilityCount !== undefined &&
-                  pkg.vulnerabilityCount > 0;
-                const isOutdated =
-                  pkg.latest && pkg.version && pkg.latest !== pkg.version;
-                const outdatedSeverity = getOutdatedSeverity(pkg);
-                const hasStarCount =
-                  pkg.starCount !== undefined && !pkg.loading && !pkg.localOnly;
-                const isDeprecatedRepo =
-                  pkg.isDeprecated && !pkg.loading && !pkg.localOnly;
-
-                return (
-                  <div
-                    key={pkg.id}
-                    className="p-2 border border-border grid grid-cols-[1fr_auto] gap-4 items-start bg-card overflow-hidden"
-                  >
-                    <div className="font-medium text-left">
-                      <div className="flex items-center">
-                        <span className="truncate">{pkg.name}</span>
-                        {showLicense && (
-                          <>
-                            <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
-                            <Link
-                              href={`https://spdx.org/licenses/${pkg.license}.html`}
-                              className="text-sm text-blue-600 hover:underline flex items-center gap-1 whitespace-nowrap"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              {pkg.license} License
-                              <ExternalLink className="size-3" />
-                            </Link>
-                          </>
-                        )}
-                      </div>
-                      {pkg.version && (
-                        <span className="text-sm text-muted-foreground">
-                          {" v" + pkg.version}
-                        </span>
-                      )}
-
-                      {isOutdated && (
+              return (
+                <div
+                  key={pkg.id}
+                  className="p-2 border border-border grid grid-cols-[1fr_auto] gap-4 items-start bg-card overflow-hidden"
+                >
+                  <div className="font-medium text-left">
+                    <div className="flex items-center">
+                      <span className="truncate">{pkg.name}</span>
+                      {showLicense && (
                         <>
                           <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
-                          <span
-                            className={`text-sm ${
-                              outdatedSeverity === "critical"
-                                ? "text-red-500"
-                                : outdatedSeverity === "high"
-                                ? "text-orange-500"
-                                : outdatedSeverity === "moderate"
-                                ? "text-yellow-500"
-                                : "text-blue-500"
-                            }`}
+                          <Link
+                            href={`https://spdx.org/licenses/${pkg.license}.html`}
+                            className="text-sm text-blue-600 hover:underline flex items-center gap-1 whitespace-nowrap"
+                            target="_blank"
+                            rel="noopener noreferrer"
                           >
-                            Latest: v{pkg.latest}
-                          </span>
+                            {pkg.license} License
+                            <ExternalLink className="size-3" />
+                          </Link>
                         </>
                       )}
-                      <br />
-                      {pkg.humanReadableSize && (
+                    </div>
+                    {pkg.version && (
+                      <span className="text-sm text-muted-foreground">
+                        {" v" + pkg.version}
+                      </span>
+                    )}
+
+                    {isOutdated && (
+                      <>
+                        <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
+                        <span
+                          className={`text-sm ${
+                            outdatedSeverity === "critical"
+                              ? "text-red-500"
+                              : outdatedSeverity === "high"
+                              ? "text-orange-500"
+                              : outdatedSeverity === "moderate"
+                              ? "text-yellow-500"
+                              : "text-blue-500"
+                          }`}
+                        >
+                          Latest: v{pkg.latest}
+                        </span>
+                      </>
+                    )}
+
+                    {pkg.humanReadableSize && (
+                      <>
+                        <br />
                         <span className="text-muted-foreground text-sm">
                           {pkg.humanReadableSize}
                         </span>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col items-end gap-2">
-                      {pkg.loading && (
-                        <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap h-full flex items-center border border-border">
-                          Loading
-                          <Spinner className="inline-block ml-1" />
-                        </span>
-                      )}
-                      {hasVulnerabilities && (
-                        <span
-                          className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
-                            pkg.vulnerabilitySeverity === "critical"
-                              ? "bg-red-200 text-red-800 border-red-800"
-                              : pkg.vulnerabilitySeverity === "high"
-                              ? "bg-orange-200 text-orange-800 border-orange-800"
-                              : pkg.vulnerabilitySeverity === "moderate"
-                              ? "bg-yellow-200 text-yellow-800 border-yellow-800"
-                              : "bg-blue-200 text-blue-800 border-blue-800"
-                          }`}
-                        >
-                          {pkg.vulnerabilityCount} vulnerability
-                          {pkg.vulnerabilityCount !== 1 ? "ies" : ""}
-                          <CircleAlert className="size-4" />
-                        </span>
-                      )}
-                      {isDeprecatedRepo && (
-                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-purple-200 text-purple-800 border-purple-800">
-                          Archived
-                          <Archive className="size-4" />
-                        </span>
-                      )}
-                      {hasStarCount && (
-                        <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-yellow-200 text-yellow-800 border-yellow-800">
-                          {pkg.starCount!.toLocaleString()}
-                          <Star className="size-4" />
-                        </span>
-                      )}
-
-                      {showCommitBadge && (
-                        <span
-                          className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
-                            monthsAgo! > 18
-                              ? "bg-red-200 text-red-800 border-red-800"
-                              : monthsAgo! > 6
-                              ? "bg-yellow-200 text-yellow-800 border-yellow-800"
-                              : "bg-green-200 text-green-800 border-green-800"
-                          }`}
-                        >
-                          {formatTimeSince(pkg.lastCommitDate!)}
-                          {monthsAgo! > 18 ? (
-                            <TriangleAlert className="size-4" />
-                          ) : monthsAgo! > 6 ? (
-                            <CircleAlert className="size-4" />
-                          ) : (
-                            <Check className="size-4" />
-                          )}
-                        </span>
-                      )}
-                      {showUnknownBadge && (
-                        <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border flex items-center justify-end gap-1">
-                          Unknown
-                          <CircleQuestionMark className="size-4" />
-                        </span>
-                      )}
+                      </>
+                    )}
+                    <br />
+                    <span className="flex flex-row items-baseline">
                       {showRepoLink && (
                         <Link
                           href={pkg.gitUrl!}
@@ -1183,36 +1158,108 @@ export default function Home() {
                         </Link>
                       )}
                       {showNPMLink && (
-                        <Link
-                          href={pkg.humanReadableNpmUrl!}
-                          className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          NPM
-                          <ExternalLink className="size-3" />
-                        </Link>
+                        <>
+                          <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
+                          <Link
+                            href={pkg.humanReadableNpmUrl!}
+                            className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            NPM
+                            <ExternalLink className="size-3" />
+                          </Link>
+                        </>
                       )}
                       {pkg.homepageUrl && (
-                        <Link
-                          href={pkg.homepageUrl}
-                          className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Homepage
-                          <ExternalLink className="size-3" />
-                        </Link>
+                        <>
+                          <span className="inline-block size-2 mx-2.5 bg-muted-foreground" />
+                          <Link
+                            href={pkg.homepageUrl}
+                            className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Homepage
+                            <ExternalLink className="size-3" />
+                          </Link>
+                        </>
                       )}
-                      {!pkg.loading && pkg.localOnly && (
-                        <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border">
-                          Local only
-                        </span>
-                      )}
-                    </div>
+                    </span>
                   </div>
-                );
-              })
+
+                  <div className="flex flex-col items-end gap-2">
+                    {pkg.loading && (
+                      <span className="text-sm bg-secondary text-secondary-foreground px-2 py-1 whitespace-nowrap h-full flex items-center border border-border">
+                        Loading
+                        <Spinner className="inline-block ml-1" />
+                      </span>
+                    )}
+                    {hasVulnerabilities && (
+                      <span
+                        className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
+                          pkg.vulnerabilitySeverity === "critical"
+                            ? "bg-red-200 text-red-800 border-red-800"
+                            : pkg.vulnerabilitySeverity === "high"
+                            ? "bg-orange-200 text-orange-800 border-orange-800"
+                            : pkg.vulnerabilitySeverity === "moderate"
+                            ? "bg-yellow-200 text-yellow-800 border-yellow-800"
+                            : "bg-blue-200 text-blue-800 border-blue-800"
+                        }`}
+                      >
+                        {pkg.vulnerabilityCount} vulnerability
+                        {pkg.vulnerabilityCount !== 1 ? "ies" : ""}
+                        <CircleAlert className="size-4" />
+                      </span>
+                    )}
+                    {isDeprecatedRepo && (
+                      <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-purple-200 text-purple-800 border-purple-800">
+                        Archived
+                        <Archive className="size-4" />
+                      </span>
+                    )}
+                    {hasStarCount && (
+                      <span className="text-sm px-2 py-1 border flex items-center justify-end gap-1 bg-yellow-200 text-yellow-800 border-yellow-800">
+                        {pkg.starCount!.toLocaleString()}
+                        <Star className="size-4" />
+                      </span>
+                    )}
+
+                    {showCommitBadge && (
+                      <span
+                        className={`text-sm px-2 py-1 border flex items-center justify-end gap-1 ${
+                          monthsAgo! > 18
+                            ? "bg-red-200 text-red-800 border-red-800"
+                            : monthsAgo! > 6
+                            ? "bg-yellow-200 text-yellow-800 border-yellow-800"
+                            : "bg-green-200 text-green-800 border-green-800"
+                        }`}
+                      >
+                        {formatTimeSince(pkg.lastCommitDate!)}
+                        {monthsAgo! > 18 ? (
+                          <TriangleAlert className="size-4" />
+                        ) : monthsAgo! > 6 ? (
+                          <CircleAlert className="size-4" />
+                        ) : (
+                          <Check className="size-4" />
+                        )}
+                      </span>
+                    )}
+                    {showUnknownBadge && (
+                      <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border flex items-center justify-end gap-1">
+                        Unknown
+                        <CircleQuestionMark className="size-4" />
+                      </span>
+                    )}
+                    {!pkg.loading && pkg.localOnly && (
+                      <span className="text-sm text-secondary-foreground bg-secondary px-2 py-1 border border-border">
+                        Local only
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
