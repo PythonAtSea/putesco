@@ -8,7 +8,6 @@ import {
   CircleAlert,
   CircleQuestionMark,
   TriangleAlert,
-  ExternalLink,
   Star,
   Archive,
 } from "lucide-react";
@@ -1106,7 +1105,6 @@ export default function Home() {
                             rel="noopener noreferrer"
                           >
                             {pkg.license} License
-                            <ExternalLink className="size-3" />
                           </Link>
                         </>
                       )}
@@ -1154,7 +1152,6 @@ export default function Home() {
                           rel="noopener noreferrer"
                         >
                           Repo
-                          <ExternalLink className="size-3" />
                         </Link>
                       )}
                       {showNPMLink && (
@@ -1167,7 +1164,6 @@ export default function Home() {
                             rel="noopener noreferrer"
                           >
                             NPM
-                            <ExternalLink className="size-3" />
                           </Link>
                         </>
                       )}
@@ -1181,7 +1177,6 @@ export default function Home() {
                             rel="noopener noreferrer"
                           >
                             Homepage
-                            <ExternalLink className="size-3" />
                           </Link>
                         </>
                       )}
